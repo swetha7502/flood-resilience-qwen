@@ -1,0 +1,37 @@
+{
+  "normal": {
+    "rainfall": {"base": 2, "variance": 1, "unit": "mm/hr"},
+    "river_level": {"base": 0.1, "variance": 0.05, "unit": "m_above_baseline"},
+    "soil_saturation": {"base": 30, "variance": 5, "unit": "percent"},
+    "drain_flow": {"base": 0, "variance": 0, "unit": "reversed_flag"}
+  },
+  "light_rain": {
+    "rainfall": {"base": 15, "variance": 5, "unit": "mm/hr"},
+    "river_level": {"base": 0.3, "variance": 0.1, "unit": "m_above_baseline"},
+    "soil_saturation": {"base": 50, "variance": 8, "unit": "percent"},
+    "drain_flow": {"base": 0, "variance": 0, "unit": "reversed_flag"}
+  },
+  "heavy_storm": {
+    "rainfall": {"base": 55, "variance": 10, "unit": "mm/hr"},
+    "river_level": {"base": 0.8, "variance": 0.15, "unit": "m_above_baseline"},
+    "soil_saturation": {"base": 78, "variance": 6, "unit": "percent"},
+    "drain_flow": {"base": 0, "variance": 0, "unit": "reversed_flag"}
+  },
+  "flash_flood": {
+    "rainfall": {"base": 90, "variance": 12, "unit": "mm/hr"},
+    "river_level": {"base": 1.3, "variance": 0.2, "unit": "m_above_baseline"},
+    "soil_saturation": {"base": 94, "variance": 3, "unit": "percent"},
+    "drain_flow": {"base": 1, "variance": 0, "unit": "reversed_flag"}
+  },
+  "thresholds": {
+    "rainfall": {"watch": 40, "warning": 70},
+    "river_level": {"watch": 0.6, "warning": 1.0},
+    "soil_saturation": {"watch": 70, "warning": 90},
+    "drain_flow": {"watch": 1, "warning": 1}
+  },
+  "zones": {
+    "A": {"sensors": ["rainfall", "soil_saturation"], "description": "Upper neighborhood, set back from river"},
+    "B": {"sensors": ["river_level", "drain_flow", "soil_saturation"], "description": "Riverside, highest historical flood risk"},
+    "C": {"sensors": ["rainfall", "drain_flow"], "description": "Low-lying central block, drain-dependent"}
+  }
+}
