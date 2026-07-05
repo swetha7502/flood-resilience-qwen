@@ -1,0 +1,46 @@
+﻿/* ─── App Shell Layout ─────────────────────────────────────────────────── */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+/* ─── Dashboard Layout Grid ─── */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+  flex: 1;
+  box-sizing: border-box;
+}
+
+.dashboard-map-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-log-panel {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+}
+
+/* Responsive adjustment for tablets and mobile */
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .dashboard-log-panel {
+    height: auto;
+  }
+}
+

@@ -1,0 +1,251 @@
+.event-log-container {
+  background-color: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 400px;
+  overflow: hidden;
+}
+
+.event-log-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.15);
+}
+
+.event-log-title {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.event-log-count {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: monospace;
+}
+
+.event-log-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.event-log-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* ── Event Item Base ── */
+.event-log-item {
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(58, 74, 90, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.event-log-item:last-child {
+  border-bottom: none;
+}
+
+.event-log-item:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* ── Meta row ── */
+.event-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.event-item-time {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.event-item-zone {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.zone-badge-a {
+  background-color: rgba(127, 168, 201, 0.15);
+  color: var(--color-accent);
+}
+
+.zone-badge-b {
+  background-color: rgba(239, 159, 39, 0.15);
+  color: var(--color-watch);
+}
+
+.zone-badge-c {
+  background-color: rgba(99, 153, 34, 0.15);
+  color: var(--color-normal);
+}
+
+.zone-badge-all {
+  background-color: rgba(232, 237, 240, 0.08);
+  color: var(--color-text-muted);
+}
+
+/* ── Event Body styling per type ── */
+.event-item-content {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* sensor_reading: muted gray */
+.event-type-sensor_reading .event-item-content {
+  color: var(--color-text-muted);
+}
+
+.sensor-value {
+  color: var(--color-text-primary);
+}
+
+.flagged-indicator {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--color-warning);
+  font-weight: 500;
+}
+
+/* risk_decision */
+.risk-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.risk-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.risk-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.risk-normal {
+  background-color: var(--color-normal);
+  color: #fff;
+}
+
+.risk-watch {
+  background-color: var(--color-watch);
+  color: #000;
+}
+
+.risk-warning {
+  background-color: var(--color-warning);
+  color: #fff;
+}
+
+.risk-emergency {
+  background-color: var(--color-emergency);
+  color: #fff;
+  animation: log-emergency-pulse 1.5s infinite alternate;
+}
+
+.risk-source {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.risk-reasoning {
+  margin: 2px 0 0 0;
+  color: var(--color-text-primary);
+}
+
+.risk-actions {
+  font-size: 11px;
+  color: var(--color-accent);
+  margin-top: 2px;
+}
+
+/* action_taken */
+.action-body {
+  margin-top: 2px;
+}
+
+.action-label {
+  color: var(--color-text-muted);
+}
+
+.action-name {
+  color: var(--color-accent);
+}
+
+.action-message {
+  margin: 2px 0;
+  color: var(--color-text-primary);
+}
+
+.checkpoint-warning {
+  background-color: rgba(153, 27, 27, 0.2);
+  border: 1px solid var(--color-emergency);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ff8a8a;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* degradation_status */
+.degradation-body {
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.degradation-offline {
+  color: var(--color-warning);
+}
+
+.degradation-restored {
+  color: var(--color-normal);
+}
+
+/* qwen_call_started: italic accent blue */
+.event-type-qwen_call_started .event-item-content {
+  font-style: italic;
+  color: var(--color-accent);
+}
+
+.muted-sensors {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: normal;
+}
+
+@keyframes log-emergency-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(153, 27, 27, 0.4); }
+  100% { box-shadow: 0 0 6px 2px rgba(153, 27, 27, 0.8); }
+}

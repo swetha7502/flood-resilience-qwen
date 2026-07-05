@@ -1,0 +1,50 @@
+/* ─── FloodGuard AI — Global Styles ──────────────────────────────────────── */
+
+/* ── Design Tokens ── */
+:root {
+  --color-bg:           #1a2028;
+  --color-panel:        #22303d;
+  --color-border:       #3a4a5a;
+  --color-text-primary: #e8edf0;
+  --color-text-muted:   #7a8a99;
+  --color-normal:       #639922;
+  --color-watch:        #EF9F27;
+  --color-warning:      #E24B4A;
+  --color-emergency:    #991b1b;
+  --color-accent:       #7fa8c9;
+  --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* ── Reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-main);
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-panel);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
