@@ -56,29 +56,27 @@ function EventLog({ events }) {
  * Renders custom content per message type based on schema
  */
 function renderEventBody(event) {
-  const { type, payload } = event;
+  const { type } = event;
 
   if (type === 'sensor_reading') {
-    const isFlow = payload.sensor === 'drain_flow';
-    const isLevel = payload.sensor === 'river_level';
-    const sensorName = payload.sensor.replace('_', ' ');
+    const sensorName = event.sensor.replace('_', ' ');
     return (
       <span className="sensor-body">
-        {sensorName}: <strong className="sensor-value">{payload.value}</strong> {payload.unit}
-        {payload.flagged && <span className="flagged-indicator">⚠️ flagged</span>}
+        {sensorName}: <strong className="sensor-value">{event.value}</strong> {event.unit}
+        {event.flagged && <span className="flagged-indicator">⚠️ flagged</span>}
       </span>
     );
   }
 
   if (type === 'risk_decision') {
-    const risk = payload.risk_level || 'normal';
-    const source = payload.source || 'unknown';
-    const confidence = payload.confidence ? ` (conf: ${(payload.confidence * 100).toFixed(0)}%)` : '';
-    const recommended = payload.recommended_actions?.length
-      ? ` [Actions: ${payload.recommended_actions.join(', ')}]`
+    const risk = event.risk_level || 'normal';
+    const source = event.source || 'cloud';
+    const confidence = event.confidence ? ` (conf: ${(event.confidence * 100).toFixed(0)}%)` : '';
+    const recommended = event.recommended_actions?.length
+      ? ` [Actions: ${event.recommended_actions.join(', ')}]`
       : '';
-    const truncatedReason = payload.reasoning
-      ? payload.reasoning.substring(0, 100) + (payload.reasoning.length > 100 ? '...' : '')
+    const truncatedReason = event.reasoning
+      ? event.reasoning.substring(0, 100) + (event.reasoning.length > 100 ? '...' : '')
       : 'No reasoning provided.';
 
     return (
@@ -98,9 +96,8 @@ function renderEventBody(event) {
   if (type === 'action_taken') {
     return (
       <div className="action-body">
-        <span className="action-label">Action:</span> <strong className="action-name">{payload.action}</strong>
-        <p className="action-message">{payload.message}</p>
-        {payload.requires_human_approval && (
+        <span className="action-label">Action:</span> <strong className="action-name">{event.action}</strong>
+        {event.requires_human_approval && (
           <div className="checkpoint-warning">
             ⚠️ REQUIRES HUMAN APPROVAL CHECKPOINT
           </div>
@@ -110,16 +107,15 @@ function renderEventBody(event) {
   }
 
   if (type === 'degradation_status') {
-    const cloudAvailable = payload.cloud_available;
     return (
-      <span className={`degradation-body degradation-${cloudAvailable ? 'restored' : 'offline'}`}>
-        {cloudAvailable ? 'CLOUD RESTORED' : 'CLOUD OFFLINE'}
+      <span className={`degradation-body degradation-${event.cloud_available ? 'restored' : 'offline'}`}>
+        {event.cloud_available ? 'CLOUD RESTORED' : 'CLOUD OFFLINE — ' + (event.cloud_state || 'local rules active')}
       </span>
     );
   }
 
   if (type === 'qwen_call_started') {
-    const sensors = payload.flagged_sensors?.join(', ') || 'multiple';
+    const sensors = event.flagged ? Object.keys(event.flagged).join(', ') : 'multiple';
     return (
       <span className="qwen-started-body">
         Qwen reasoning... <span className="muted-sensors">(trigger: {sensors})</span>
@@ -127,7 +123,7 @@ function renderEventBody(event) {
     );
   }
 
-  return <span className="default-body">{JSON.stringify(payload)}</span>;
+  return <span className="default-body">{JSON.stringify(event)}</span>;
 }
 
 export default EventLog;
