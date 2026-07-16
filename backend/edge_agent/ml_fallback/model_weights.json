@@ -1,0 +1,40 @@
+{
+  "feature_order": [
+    "rainfall",
+    "river_level",
+    "soil_saturation",
+    "drain_flow"
+  ],
+  "classes": [
+    "EMERGENCY",
+    "WARNING",
+    "WATCH"
+  ],
+  "coef": [
+    [
+      8.384108103136262,
+      8.91240249055321,
+      5.037987411029357,
+      2.691133708012212
+    ],
+    [
+      -0.2216677351198419,
+      -1.7863794889482598,
+      0.4508428314669004,
+      -0.5778697184312235
+    ],
+    [
+      -8.162440368016435,
+      -7.126023001604942,
+      -5.488830242496251,
+      -2.1132639895809886
+    ]
+  ],
+  "intercept": [
+    -15.765437340492952,
+    2.5190269284757396,
+    13.24641041201758
+  ],
+  "normalization": "value / THRESHOLDS[sensor]['emergency'], uncapped",
+  "trained_on": "synthetic samples distilled from the hand-crafted weighted-rule in edge_agent.py, NOT real flood history (none exists for this project) -- see this file's module docstring."
+}

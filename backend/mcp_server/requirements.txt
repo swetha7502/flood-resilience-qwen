@@ -1,0 +1,5 @@
+# Isolated from backend/requirements.txt on purpose: the mcp SDK pulls in
+# a newer starlette than fastapi==0.115.5 (used by coordinator.py) allows.
+# Run this server in its own virtualenv/container, not alongside the
+# coordinator's dependencies.
+mcp==1.28.1

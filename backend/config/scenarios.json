@@ -24,14 +24,19 @@
     "drain_flow": {"base": 1, "variance": 0, "unit": "reversed_flag"}
   },
   "thresholds": {
-    "rainfall": {"watch": 40, "warning": 70},
-    "river_level": {"watch": 0.6, "warning": 1.0},
-    "soil_saturation": {"watch": 70, "warning": 90},
-    "drain_flow": {"watch": 1, "warning": 1}
+    "rainfall":        {"watch": 20,  "warning": 40,  "emergency": 65},
+    "river_level":     {"watch": 0.5, "warning": 0.9, "emergency": 1.2},
+    "soil_saturation": {"watch": 60,  "warning": 75,  "emergency": 90},
+    "drain_flow":      {"watch": 1,   "warning": 1,   "emergency": 1}
   },
+  "_thresholds_note": "drain_flow is a boolean backup indicator (0/1), not a continuous reading -- a value of 1 means the drain is actively backing up, which is inherently a high-severity signal on its own, so watch/warning/emergency are intentionally all 1 rather than assigning it a fake continuous scale. river_level/rainfall/soil_saturation tiers are calibrated against the base+variance ranges in the scenario blocks above so each of the 4 demo scenarios (normal/light_rain/heavy_storm/flash_flood) produces a distinct, escalating flag pattern -- verify with: heavy_storm should flag rainfall+soil_saturation at warning and river_level at watch; flash_flood should flag all 4 sensors at emergency.",
   "zones": {
-    "A": {"sensors": ["rainfall", "soil_saturation"], "description": "Upper neighborhood, set back from river"},
-    "B": {"sensors": ["river_level", "drain_flow", "soil_saturation"], "description": "Riverside, highest historical flood risk"},
-    "C": {"sensors": ["rainfall", "drain_flow"], "description": "Low-lying central block, drain-dependent"}
-  }
+    "A": {"sensors": ["rainfall", "soil_saturation"], "description": "Upper neighborhood, set back from river",
+          "reference_location": {"lat": 39.2705, "lon": -76.7975, "label": "Zone A reference point"}},
+    "B": {"sensors": ["river_level", "drain_flow", "soil_saturation"], "description": "Riverside, highest historical flood risk",
+          "reference_location": {"lat": 39.2673, "lon": -76.7983, "label": "Zone B reference point"}},
+    "C": {"sensors": ["rainfall", "drain_flow"], "description": "Low-lying central block, drain-dependent",
+          "reference_location": {"lat": 39.2687, "lon": -76.7970, "label": "Zone C reference point"}}
+  },
+  "_reference_location_note": "Deliberately generic labels ('Zone A reference point'), not a named real place: the get_regional_weather tool returns genuine current weather for these coordinates, but the frontend's neighborhood map is a purely illustrated/fictional graphic. If Qwen's reasoning (or the UI) named a specific real town here, it would visibly contradict the illustrated map a viewer is looking at -- confusing at best, misleading-looking at worst. The coordinates themselves are real (chosen from a real flood-prone area, for realistic weather variance) but that specific-place detail is intentionally kept out of anything the model or frontend can surface. For an actual deployment, replace these with the real coordinates of wherever the system is actually protecting -- then naming the real place is accurate, not just plausible."
 }

@@ -14,7 +14,10 @@ While running, use redis-cli in another terminal to watch raw readings:
 To control the demo scenario live, this script also listens on a control
 channel "demo:control" for messages like:
     {"action": "set_scenario", "scenario": "heavy_storm"}
-    {"action": "set_cloud", "available": false}
+
+(Cloud on/off/degrade is NOT handled here -- see demo_control.py, which
+calls the coordinator's /cloud/on, /cloud/off, /cloud/degrade endpoints
+directly. Sensor agents have no cloud-awareness of their own.)
 
 This lets Person B's frontend (or a simple CLI) drive the demo without
 restarting any process.
@@ -31,7 +34,14 @@ sys.path.insert(0, os.path.dirname(__file__))
 from agents.sensor_agent import SensorAgent  # noqa: E402
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-SCENARIOS_PATH = os.path.join(os.path.dirname(__file__), "config", "scenarios.json")
+# Same env var config/loader.py (used by edge_agent.py and coordinator.py)
+# reads -- keeping the variable name identical means setting it once
+# switches the whole deployment (sensors + edge agent + coordinator) to a
+# different config/scenarios.json, e.g. for a second city, in one place.
+SCENARIOS_PATH = os.getenv(
+    "FLOODGUARD_CONFIG_PATH",
+    os.path.join(os.path.dirname(__file__), "config", "scenarios.json"),
+)
 
 
 async def control_listener(redis_client, agents: list[SensorAgent]):
@@ -54,11 +64,13 @@ async def control_listener(redis_client, agents: list[SensorAgent]):
                 agent.set_scenario(scenario)
             print(f"[control] scenario -> {scenario}")
 
-        elif cmd.get("action") == "set_cloud":
-            available = cmd["available"]
-            for agent in agents:
-                agent.set_cloud_available(available)
-            print(f"[control] cloud_available -> {available}")
+        # Cloud on/off/degrade is no longer handled here. Sensor agents don't
+        # own any cloud-awareness anymore -- that all lives in edge_agent.py,
+        # which learns about cloud health from real HTTP calls to the
+        # coordinator, not from a flag pushed over Redis. Use demo_control.py,
+        # which now calls the coordinator's /cloud/on, /cloud/off, and
+        # /cloud/degrade endpoints directly -- the same endpoints the
+        # frontend's DemoControlPanel uses.
 
 
 async def main():

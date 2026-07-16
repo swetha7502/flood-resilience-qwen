@@ -1,0 +1,8 @@
+# Dev-time only. Needed ONLY to run edge_agent/ml_fallback/train_model.py
+# (retraining the local ML fallback model). NOT installed on the deployed
+# edge agent -- it only ever imports edge_agent/ml_fallback/inference.py,
+# which is pure Python stdlib and reads the small JSON file this training
+# script produces. Real edge/IoT hardware often can't afford an sklearn
+# install; this split keeps that constraint honest.
+scikit-learn==1.5.2
+numpy==2.1.3

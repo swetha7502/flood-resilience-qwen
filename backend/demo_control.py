@@ -3,32 +3,46 @@ demo_control.py — Live scenario and cloud state control for FloodGuard AI demo
 
 Commands:
     normal | light_rain | heavy_storm | flash_flood   — switch sensor scenario
-    cloud off                                          — simulate cloud going offline
+    cloud off                                          — real cloud outage (drives edge_agent's state machine)
     cloud on                                           — restore cloud
-    cloud degrade                                      — simulate slow/flaky cloud (streak of timeouts)
-    status                                             — show current cloud state from edge agent
+    cloud degrade                                      — simulate slow/flaky cloud (real timeout, not scripted)
+    status                                             — show current cloud state
+    weights                                            — show current adaptive cache-replay signal weights
     quit
+
+IMPORTANT: cloud on/off/degrade now call the coordinator's REST endpoints
+(/cloud/on, /cloud/off, /cloud/degrade) directly -- the same endpoints the
+frontend's DemoControlPanel uses. An earlier version of this script instead
+published to the Redis "demo:control" channel, which only reached the
+sensor agents' own (now-removed) local fallback logic and never touched
+the coordinator or edge_agent at all -- so "cloud off" here didn't actually
+put the edge agent's real 4-state degradation machine into DEGRADED/OFFLINE/
+EXTENDED like the docstring claimed; it silently drove a completely
+different, now-deleted code path instead.
 """
 
 import asyncio
 import json
 import os
 
+import httpx
 import redis.asyncio as redis
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+COORDINATOR_URL = os.getenv("COORDINATOR_URL", "http://localhost:8000")
 VALID_SCENARIOS = {"normal", "light_rain", "heavy_storm", "flash_flood"}
 
 
 async def main():
     redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    http = httpx.AsyncClient(base_url=COORDINATOR_URL, timeout=5.0)
 
     print("=" * 50)
     print("FloodGuard Demo Control")
     print("=" * 50)
     print("Scenarios : normal | light_rain | heavy_storm | flash_flood")
     print("Cloud     : cloud off | cloud on | cloud degrade")
-    print("Info      : status")
+    print("Info      : status | weights")
     print("Exit      : quit")
     print()
 
@@ -41,6 +55,8 @@ async def main():
             break
 
         elif line in VALID_SCENARIOS:
+            # Scenario changes still go over Redis -- sensor agents are pure
+            # data producers and this is the only thing they need to react to.
             await redis_client.publish(
                 "demo:control",
                 json.dumps({"action": "set_scenario", "scenario": line}),
@@ -48,42 +64,56 @@ async def main():
             print(f"  Scenario switched to: {line}")
 
         elif line == "cloud off":
-            # Publishes to demo:control (sensors read this) AND hits coordinator REST
-            await redis_client.publish(
-                "demo:control",
-                json.dumps({"action": "set_cloud", "available": False}),
-            )
-            print("  Cloud marked offline. Edge agent will enter DEGRADED → OFFLINE → EXTENDED states.")
-            print("  Watch edge_agent logs for state transitions at 10s / 30s / 90s.")
+            try:
+                await http.post("/cloud/off")
+                print("  Cloud disabled on the coordinator. The edge agent's next")
+                print("  /analyze call will fail for real -- watch its logs for")
+                print("  DEGRADED -> OFFLINE -> EXTENDED transitions at 10s/30s/90s.")
+            except httpx.RequestError as e:
+                print(f"  Could not reach coordinator: {e}")
 
         elif line == "cloud on":
-            await redis_client.publish(
-                "demo:control",
-                json.dumps({"action": "set_cloud", "available": True}),
-            )
-            print("  Cloud restored. Edge agent will sync outage decisions, then return to CONNECTED.")
+            try:
+                await http.post("/cloud/on")
+                print("  Cloud restored. Edge agent will sync outage decisions, then return to CONNECTED.")
+            except httpx.RequestError as e:
+                print(f"  Could not reach coordinator: {e}")
 
         elif line == "cloud degrade":
-            # Simulates flaky cloud — edge agent will hit timeout streak → DEGRADED state
-            await redis_client.publish(
-                "demo:control",
-                json.dumps({"action": "set_cloud_degraded", "available": True, "latency_ms": 4000}),
-            )
-            print("  Cloud set to simulate high latency (4s). Edge agent will hit timeout streak → DEGRADED.")
-            print("  Cache replay will activate. Switch back with: cloud on")
+            try:
+                await http.post("/cloud/degrade")
+                print("  Coordinator will now sleep ~18s before responding to /analyze --")
+                print("  longer than the edge agent's 16s timeout, so it hits a REAL")
+                print("  timeout and transitions into DEGRADED (cache replay). Switch")
+                print("  back with: cloud on")
+            except httpx.RequestError as e:
+                print(f"  Could not reach coordinator: {e}")
 
         elif line == "status":
-            # Read current edge agent state from Redis
-            state = await redis_client.get("edge:cloud_state")
-            outage_count = await redis_client.llen("edge:outage_decisions")
-            cache_count = await redis_client.llen("edge:decision_cache")
-            print(f"  Cloud state     : {state or 'unknown'}")
-            print(f"  Outage decisions: {outage_count}")
-            print(f"  Cached decisions: {cache_count}")
+            try:
+                health = (await http.get("/health")).json()
+                state = await redis_client.get("edge:cloud_state")
+                print(f"  Coordinator cloud_enabled : {health.get('cloud_enabled')}")
+                print(f"  Edge agent cloud_state    : {state or 'unknown (edge agent not running / no state yet)'}")
+            except httpx.RequestError as e:
+                print(f"  Could not reach coordinator: {e}")
+
+        elif line == "weights":
+            raw = await redis_client.get("edge:signal_weights")
+            if raw:
+                weights = json.loads(raw)
+                print("  Adaptive cache-replay signal weights (nudged by real outage feedback):")
+                for sensor, w in sorted(weights.items(), key=lambda kv: -kv[1]):
+                    print(f"    {sensor:16s} {w:.4f}")
+            else:
+                print("  No adaptive weights recorded yet (edge agent hasn't been through an")
+                print("  outage + reconnect cycle since last restart) -- using config defaults.")
 
         else:
             print(f"  Unknown command: {line!r}")
-            print("  Try: normal | light_rain | heavy_storm | flash_flood | cloud off | cloud on | cloud degrade | status | quit")
+            print("  Try: normal | light_rain | heavy_storm | flash_flood | cloud off | cloud on | cloud degrade | status | weights | quit")
+
+    await http.aclose()
 
 
 if __name__ == "__main__":

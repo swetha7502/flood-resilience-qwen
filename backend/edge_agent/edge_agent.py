@@ -26,33 +26,40 @@ from typing import Optional
 import httpx
 import redis.asyncio as redis
 
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from config.loader import THRESHOLDS, ZONES, SENSOR_TYPES, SIGNAL_WEIGHTS  # noqa: E402
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "ml_fallback"))
+import inference as ml_inference  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="[edge_agent] %(message)s")
 log = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 COORDINATOR_URL = os.getenv("COORDINATOR_URL", "http://localhost:8000")
 
-ZONES = ["A", "B", "C"]
-SENSOR_TYPES = ["rainfall", "river_level", "soil_saturation", "drain_flow"]
-
-THRESHOLDS = {
-    "rainfall":        {"watch": 20,  "warning": 40,  "emergency": 60},
-    "river_level":     {"watch": 1.5, "warning": 2.5, "emergency": 3.5},
-    "soil_saturation": {"watch": 60,  "warning": 75,  "emergency": 90},
-    "drain_flow":      {"watch": 70,  "warning": 85,  "emergency": 95},
-}
-
-SIGNAL_WEIGHTS = {
-    "river_level":     0.35,
-    "rainfall":        0.30,
-    "soil_saturation": 0.25,
-    "drain_flow":      0.10,
-}
+# THRESHOLDS, ZONES, SENSOR_TYPES, SIGNAL_WEIGHTS now come from
+# config/loader.py, which reads config/scenarios.json -- the same file
+# sensor_agent.py uses to decide whether a reading is flagged in the
+# first place. This is the single source of truth: previously this file
+# had its own hand-copied THRESHOLDS dict that had drifted from
+# scenarios.json (river_level/drain_flow thresholds were unreachable by
+# the actual simulated ranges), meaning Zone B's two most important
+# signals could never register as flagged. See config/loader.py for the
+# full rationale on SIGNAL_WEIGHTS and the drain_flow boolean threshold.
 
 DEGRADED_AFTER_SEC = 10
 OFFLINE_AFTER_SEC = 30
 EXTENDED_AFTER_SEC = 90
-CLOUD_CALL_TIMEOUT_SEC = 3.0
+CLOUD_CALL_TIMEOUT_SEC = 3.0     # health probe / broadcast / catchup -- these are cheap, should be fast
+ANALYZE_CALL_TIMEOUT_SEC = 16.0  # /analyze specifically: coordinator now budgets up to 13s
+                                  # internally (4s optional MCP audit-trend lookup + 9s for
+                                  # weather lookup + up to 2 Qwen calls), so this must exceed
+                                  # that with real margin, or the edge agent would time out
+                                  # and declare the cloud "down" while the coordinator/Qwen
+                                  # call was still on track to succeed. See coordinator.py's
+                                  # MCP_AUDIT_TIMEOUT_SEC + ANALYZE_TOTAL_TIMEOUT_SEC.
 CLOUD_PROBE_INTERVAL_SEC = 15   # probe cloud every 15s when degraded/offline/extended
 CACHE_SIZE = 20
 
@@ -116,9 +123,24 @@ class EdgeAgent:
         self.decision_cache: list = []
         self.outage_decisions: list = []
 
+        # Adaptive copy of SIGNAL_WEIGHTS, used ONLY for cache-replay
+        # similarity scoring (_replay_cached_decision) -- NOT for the risk
+        # classification itself (that's the ML model / weighted-rule fallback,
+        # kept fixed for stability). Starts from the config defaults; nudged
+        # over time by _record_replay_outcome based on whether a cached
+        # decision's fingerprint-similarity match actually agreed with what
+        # Qwen said once the cloud came back. Restored from Redis on startup
+        # if a previous run already adapted it (see start()).
+        self.signal_weights: dict = dict(SIGNAL_WEIGHTS)
+        # Most recent cache-replay per zone, so the NEXT successful cloud
+        # decision for that zone has something to compare against:
+        # {"current_fp":, "matched_fp":, "risk_level":, "timestamp":}
+        self.last_replay_by_zone: dict = {}
+
     async def start(self):
         self.redis = redis.from_url(REDIS_URL, decode_responses=True)
         self.http = httpx.AsyncClient(base_url=COORDINATOR_URL, timeout=CLOUD_CALL_TIMEOUT_SEC)
+        await self._restore_signal_weights()
         log.info("Edge agent started. Coordinator: %s | Redis: %s", COORDINATOR_URL, REDIS_URL)
 
         await asyncio.gather(
@@ -126,6 +148,20 @@ class EdgeAgent:
             self._cloud_state_watchdog(),
             self._cloud_probe_loop(),       # NEW: auto-recovery probe
         )
+
+    async def _restore_signal_weights(self):
+        """Load previously-adapted weights from Redis if this isn't the
+        first time this edge agent has run -- otherwise adaptation would
+        reset to config defaults on every restart, which defeats the point."""
+        try:
+            raw = await self.redis.get("edge:signal_weights")
+            if raw:
+                restored = json.loads(raw)
+                if set(restored.keys()) == set(self.signal_weights.keys()):
+                    self.signal_weights = restored
+                    log.info("Restored adaptive signal weights from Redis: %s", self.signal_weights)
+        except Exception as e:
+            log.warning("Could not restore signal weights from Redis (using config defaults): %s", e)
 
     async def _subscribe_sensors(self):
         pubsub = self.redis.pubsub()
@@ -229,7 +265,13 @@ class EdgeAgent:
 
     async def _cloud_decision(self, zone: str, readings: dict) -> Optional[dict]:
         try:
-            response = await self.http.post(f"/analyze/{zone}", json=readings)
+            # ANALYZE_CALL_TIMEOUT_SEC (not the client default) because
+            # /analyze can take longer than a simple health check -- the
+            # coordinator may do a weather lookup plus up to two Qwen
+            # calls before responding.
+            response = await self.http.post(
+                f"/analyze/{zone}", json=readings, timeout=ANALYZE_CALL_TIMEOUT_SEC
+            )
             if response.status_code == 200:
                 data = response.json()
                 if "error" not in data:
@@ -257,13 +299,23 @@ class EdgeAgent:
             score = 0.0
             for sensor in SENSOR_TYPES:
                 if current_fp.get(sensor) == cached.fingerprint.get(sensor):
-                    score += SIGNAL_WEIGHTS.get(sensor, 0.1)
+                    score += self.signal_weights.get(sensor, 0.1)
             return score
 
         best = max(candidates, key=similarity)
         best_score = similarity(best)
         log.info("Zone %s: replaying cached decision (similarity=%.2f, risk=%s)",
                  zone, best_score, best.risk_level)
+
+        # Remember this so the next successful cloud decision for this zone
+        # can tell us whether trusting this particular match was actually
+        # right -- see _record_replay_outcome, called from _on_cloud_success.
+        self.last_replay_by_zone[zone] = {
+            "current_fp": current_fp,
+            "matched_fp": best.fingerprint,
+            "risk_level": best.risk_level,
+            "timestamp": time.time(),
+        }
 
         return {
             "zone": zone,
@@ -277,10 +329,48 @@ class EdgeAgent:
         }
 
     # -----------------------------------------------------------------------
-    # State 2 — Weighted local rules
+    # State 2 — Local ML model (falls back to weighted rules if unavailable)
     # -----------------------------------------------------------------------
 
     def _local_weighted_decision(self, zone: str, snapshot: SensorSnapshot, flagged: dict) -> dict:
+        """
+        Tries the trained local ML model (see ml_fallback/) first -- pure
+        Python, zero cloud dependency, same as the weighted-rule approach
+        it's replacing, but with a continuous decision surface and
+        genuine softmax confidence instead of a hard threshold cutoff.
+        Falls back to the original hand-written weighted rule if the
+        model file is missing or fails to load for any reason: even the
+        ML fallback has its own fallback, which is the whole point of
+        this project.
+        """
+        try:
+            risk_level, confidence, class_probs = ml_inference.predict(snapshot.readings, THRESHOLDS)
+            decision = {
+                "zone": zone,
+                "risk_level": risk_level,
+                "confidence": round(confidence, 2),
+                "reasoning": (
+                    f"[LOCAL ML MODEL] {risk_level} (confidence {confidence:.2f}). "
+                    f"Class probabilities: {', '.join(f'{k}={v:.2f}' for k, v in class_probs.items())}. "
+                    f"Dominant signals: {', '.join(sorted(flagged.keys(), key=lambda s: -SIGNAL_WEIGHTS.get(s, 0)))}."
+                ),
+                "recommended_actions": self._default_actions(risk_level),
+                "requires_human_approval": risk_level == "WARNING",
+                "source": "local_ml",
+                "timestamp": time.time(),
+            }
+            self.outage_decisions.append(decision)
+            return decision
+        except ml_inference.ModelUnavailable as e:
+            log.warning("Zone %s: local ML model unavailable (%s) -- falling back to weighted rules", zone, e)
+            return self._weighted_rule_decision(zone, snapshot, flagged)
+
+    def _weighted_rule_decision(self, zone: str, snapshot: SensorSnapshot, flagged: dict) -> dict:
+        """The original hand-written weighted-rule logic. Now only reached
+        if the ML model in ml_fallback/ isn't available -- kept verbatim
+        as a fallback-of-fallback, not replaced, since it has no external
+        file dependency at all and is the most bulletproof path in the
+        whole system."""
         weighted_score = 0.0
         for sensor, value in snapshot.readings.items():
             t = THRESHOLDS.get(sensor, {})
@@ -296,7 +386,7 @@ class EdgeAgent:
             "risk_level": risk_level,
             "confidence": round(confidence, 2),
             "reasoning": (
-                f"[LOCAL WEIGHTED RULES] Weighted risk score {weighted_score:.2f}. "
+                f"[LOCAL WEIGHTED RULES -- ML fallback unavailable] Weighted risk score {weighted_score:.2f}. "
                 f"Dominant signals: {', '.join(sorted(flagged.keys(), key=lambda s: -SIGNAL_WEIGHTS.get(s, 0)))}."
             ),
             "recommended_actions": self._default_actions(risk_level),
@@ -411,8 +501,62 @@ class EdgeAgent:
         if len(self.decision_cache) > CACHE_SIZE:
             self.decision_cache.pop(0)
 
+        self._record_replay_outcome(zone, fresh_risk_level=cached.risk_level)
+
+        asyncio.create_task(self._persist_state_to_redis())
         if was_offline and self.outage_decisions:
             asyncio.create_task(self._sync_outage_decisions())
+
+    def _record_replay_outcome(self, zone: str, fresh_risk_level: str):
+        """
+        Real feedback loop for self.signal_weights (cache-replay similarity
+        only -- NOT the risk classification weights, which stay fixed).
+
+        There's no ground truth for what SHOULD have happened during an
+        outage -- we can't rerun history. So this uses the best proxy
+        available: did the LAST cache-replay decision for this zone agree
+        with the FIRST fresh cloud decision once Qwen was reachable again?
+        If the sensors that drove that replay's fingerprint match were
+        "right" (agreement held up), nudge their weight up slightly; if the
+        replay's risk_level didn't hold up, nudge them down. Small, bounded
+        steps with a floor, renormalized to sum to 1.0 -- this is meant to
+        slowly track which signals are actually predictive for THIS
+        deployment's sensor layout, not to lurch around on one data point.
+        """
+        replay = self.last_replay_by_zone.pop(zone, None)
+        if not replay:
+            return  # no recent replay to evaluate for this zone
+
+        matched = (replay["risk_level"] == fresh_risk_level)
+        step = 0.02 if matched else -0.02
+        agreeing_sensors = [
+            s for s in SENSOR_TYPES
+            if s in replay["current_fp"] and s in replay["matched_fp"]
+            and replay["current_fp"][s] == replay["matched_fp"][s]
+        ]
+        if not agreeing_sensors:
+            return
+
+        for sensor in agreeing_sensors:
+            current = self.signal_weights.get(sensor, 0.1)
+            self.signal_weights[sensor] = max(0.01, current + step)
+
+        total = sum(self.signal_weights.values())
+        self.signal_weights = {k: v / total for k, v in self.signal_weights.items()}
+
+        log.info(
+            "Zone %s: replay outcome %s (replayed=%s, actual=%s) -- adapted weights for %s: %s",
+            zone, "CONFIRMED" if matched else "OVERRULED", replay["risk_level"],
+            fresh_risk_level, agreeing_sensors,
+            {k: round(v, 3) for k, v in self.signal_weights.items()},
+        )
+        asyncio.create_task(self._persist_signal_weights())
+
+    async def _persist_signal_weights(self):
+        try:
+            await self.redis.set("edge:signal_weights", json.dumps(self.signal_weights))
+        except Exception as e:
+            log.warning("Failed to persist adaptive signal weights: %s", e)
 
     def _on_cloud_failure(self):
         self.cloud_failure_streak += 1
@@ -435,6 +579,7 @@ class EdgeAgent:
             asyncio.create_task(self._broadcast_cloud_state())
 
     async def _broadcast_cloud_state(self):
+        await self._persist_state_to_redis()
         try:
             await self.http.post("/degradation_status", json={
                 "cloud_state": self.cloud_state.value,
@@ -447,6 +592,31 @@ class EdgeAgent:
                 "cloud_state": self.cloud_state.value,
                 "cloud_available": False,
             }))
+
+    async def _persist_state_to_redis(self):
+        """
+        Mirrors current state into Redis keys that demo_control.py's
+        `status` command reads. Without this, that command always
+        reported 'unknown' / 0 / 0 regardless of real state, since
+        nothing ever wrote those keys -- a genuine gap between the CLI
+        tool's stated behavior and what the edge agent actually did.
+        """
+        try:
+            await self.redis.set("edge:cloud_state", self.cloud_state.value)
+            await self.redis.delete("edge:outage_decisions")
+            if self.outage_decisions:
+                await self.redis.rpush(
+                    "edge:outage_decisions",
+                    *[json.dumps(d) for d in self.outage_decisions],
+                )
+            await self.redis.delete("edge:decision_cache")
+            if self.decision_cache:
+                await self.redis.rpush(
+                    "edge:decision_cache",
+                    *[c.risk_level for c in self.decision_cache],
+                )
+        except Exception as e:
+            log.warning("Failed to persist state to Redis: %s", e)
 
     async def _cloud_state_watchdog(self):
         while True:
