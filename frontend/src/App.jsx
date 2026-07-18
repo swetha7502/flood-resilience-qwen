@@ -2,6 +2,7 @@
 import { useWebSocket } from './hooks/useWebSocket';
 import Header from './components/Header.jsx';
 import CloudBanner from './components/CloudBanner.jsx';
+import DemoControlPanel from './components/DemoControlPanel.jsx';
 import NeighborhoodMap from './components/NeighborhoodMap.jsx';
 import EventLog from './components/EventLog.jsx';
 import CheckpointModal from './components/CheckpointModal.jsx';
@@ -12,8 +13,6 @@ function getApiBase() {
 }
 
 const riskToSize = { normal: 0, watch: 20, warning: 45, emergency: 70 };
-
-// Minimum ms between log entries for the same zone — prevents log flooding
 const LOG_COOLDOWN_MS = 8000;
 
 function App() {
@@ -24,9 +23,13 @@ function App() {
   const [zoneRisks, setZoneRisks] = useState({ A: 'normal', B: 'normal', C: 'normal' });
   const [liveWaterSizes, setLiveWaterSizes] = useState({ A: 0, B: 0, C: 0 });
   const [overrides, setOverrides] = useState({ A: null, B: null, C: null });
-
-  // Track last log time per zone to throttle entries
   const lastLogTime = useRef({ A: 0, B: 0, C: 0 });
+
+  // Track which risk_level was last approved per zone, so we don't
+  // re-queue the same ongoing WARNING every evaluation cycle just
+  // because requires_human_approval is recomputed fresh each time
+  // with no backend memory of prior approvals.
+  const approvedZones = useRef({});
 
   useEffect(() => {
     fetch(`${getApiBase()}/health`)
@@ -41,7 +44,6 @@ function App() {
     switch (msg.type) {
       case 'degradation_status': {
         setCloudAvailable(msg.cloud_available ?? false);
-        // Always log degradation status changes
         setEvents((prev) => [{
           ...msg,
           id: `${now}-${Math.random().toString(36).substr(2, 9)}`
@@ -52,12 +54,9 @@ function App() {
       case 'risk_decision': {
         const zone = msg.zone;
         const riskLevel = (msg.risk_level || 'normal').toLowerCase();
-
         if (zone) {
           setZoneRisks((prev) => ({ ...prev, [zone]: riskLevel }));
           setLiveWaterSizes((prev) => ({ ...prev, [zone]: riskToSize[riskLevel] ?? 0 }));
-
-          // Throttle log entries per zone
           const lastTime = lastLogTime.current[zone] || 0;
           if (now - lastTime >= LOG_COOLDOWN_MS) {
             lastLogTime.current[zone] = now;
@@ -71,9 +70,8 @@ function App() {
       }
 
       case 'action_taken': {
-        // Don't add to event log — risk_decision already covers it
-        // Only handle checkpoint queue
         if (msg.requires_human_approval) {
+          if (approvedZones.current[msg.zone] === msg.risk_level) break;
           setCheckpointQueue((prev) => {
             const alreadyQueued = prev.some((item) => item.zone === msg.zone);
             if (alreadyQueued) return prev;
@@ -84,12 +82,24 @@ function App() {
       }
 
       case 'qwen_call_started': {
-        // Throttle these too — one per zone per cooldown window
         const zone = msg.zone;
         const lastTime = lastLogTime.current[zone] || 0;
-        if (now - lastTime < LOG_COOLDOWN_MS) break; // skip if we just logged for this zone
+        if (now - lastTime < LOG_COOLDOWN_MS) break;
         setEvents((prev) => [{
           ...msg,
+          id: `${now}-${Math.random().toString(36).substr(2, 9)}`
+        }, ...prev].slice(0, 50));
+        break;
+      }
+
+      case 'scenario_changed': {
+        // Reset zone risks on scenario change
+        setZoneRisks({ A: 'normal', B: 'normal', C: 'normal' });
+        setLiveWaterSizes({ A: 0, B: 0, C: 0 });
+        setEvents((prev) => [{
+          type: 'scenario_changed',
+          scenario: msg.scenario,
+          timestamp: now / 1000,
           id: `${now}-${Math.random().toString(36).substr(2, 9)}`
         }, ...prev].slice(0, 50));
         break;
@@ -103,12 +113,12 @@ function App() {
   useWebSocket(handleMessage);
 
   const handleApproveCheckpoint = useCallback(async (zone, checkpointEvent) => {
-    const base = getApiBase();
-    const res = await fetch(`${base}/approve/${zone}`, {
+    const res = await fetch(`${getApiBase()}/approve/${zone}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });
-    if (!res.ok) throw new Error(`Approval endpoint returned HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    approvedZones.current[zone] = checkpointEvent.risk_level;
     setCheckpointQueue((prev) => prev.filter((item) => item.id !== checkpointEvent.id));
   }, []);
 
@@ -118,18 +128,15 @@ function App() {
 
   const handleTriggerTestCheckpoint = useCallback((zone) => {
     const fakeEvent = {
-      type: 'action_taken',
-      zone,
+      type: 'action_taken', zone,
       timestamp: Date.now() / 1000,
       id: `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      action: 'WARNING',
-      requires_human_approval: true,
-      reasoning: `Simulated checkpoint: Verification request for flood gates and drainage pumps in Zone ${zone}.`,
+      action: 'WARNING', requires_human_approval: true,
+      reasoning: `Simulated checkpoint: Verification request for flood gates in Zone ${zone}.`,
       confidence: parseFloat((0.85 + Math.random() * 0.14).toFixed(2))
     };
     setCheckpointQueue((prev) => {
-      const alreadyQueued = prev.some((item) => item.zone === zone);
-      if (alreadyQueued) return prev;
+      if (prev.some((item) => item.zone === zone)) return prev;
       return [...prev, fakeEvent];
     });
   }, []);
@@ -150,8 +157,7 @@ function App() {
     setCloudAvailable(nextState);
     try {
       const res = await fetch(`${getApiBase()}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        method: 'POST', headers: { 'Content-Type': 'application/json' }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch {
@@ -169,6 +175,7 @@ function App() {
         onToggleCloud={handleToggleCloud}
         isTogglingCloud={isTogglingCloud}
       />
+      <DemoControlPanel apiBase={getApiBase()} />
       <main className="dashboard-grid">
         <section className="dashboard-map-panel">
           <NeighborhoodMap

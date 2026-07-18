@@ -46,7 +46,7 @@ function NeighborhoodMap({ zoneRisks, liveWaterSizes, overrides, onSetOverride, 
       case 'emergency': return { count: 96, overlayOpacity: 0.86, speedMin: 0.45, speedMax: 0.65, dropOpacityMin: 0.48, dropOpacityMax: 0.7,  lengthMin: 76, lengthMax: 92 };
       case 'warning':   return { count: 60, overlayOpacity: 0.72, speedMin: 0.65, speedMax: 0.85, dropOpacityMin: 0.4,  dropOpacityMax: 0.58, lengthMin: 72, lengthMax: 88 };
       case 'watch':     return { count: 36, overlayOpacity: 0.6,  speedMin: 0.85, speedMax: 1.1,  dropOpacityMin: 0.34, dropOpacityMax: 0.5,  lengthMin: 68, lengthMax: 82 };
-      default:          return { count: 18, overlayOpacity: 0.48, speedMin: 1.2,  speedMax: 1.5,  dropOpacityMin: 0.26, dropOpacityMax: 0.38, lengthMin: 64, lengthMax: 78 };
+      default: return { count: 0, overlayOpacity: 0, speedMin: 1.2, speedMax: 1.5, dropOpacityMin: 0, dropOpacityMax: 0, lengthMin: 64, lengthMax: 78 };
     }
   }, [highestRisk]);
 

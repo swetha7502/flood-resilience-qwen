@@ -22,7 +22,7 @@ from typing import Optional
 
 import httpx
 import redis.asyncio as redis
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 
@@ -482,6 +482,37 @@ async def cloud_degrade():
     await _broadcast({"type": "degradation_status", "cloud_available": True, "cloud_state": "degraded"})
     log.info("Cloud set to simulate high latency (%.0fs) via demo control", artificial_delay_sec)
     return {"cloud_enabled": True, "artificial_delay_sec": artificial_delay_sec}
+
+@app.post("/scenario/{scenario_name}")
+async def set_scenario(scenario_name: str):
+    """
+    Lets the frontend's DemoControlPanel switch the active sensor scenario.
+
+    This didn't exist before -- demo_control.py's CLI publishes directly to
+    the "demo:control" Redis channel, which works fine for a backend-side
+    Python process with a real Redis connection, but a browser has no way
+    to do that. Without this HTTP endpoint, DemoControlPanel's scenario
+    buttons had nothing to actually call.
+
+    Publishes the same "demo:control" message run_agents.py's sensor agents
+    already listen for (identical payload shape to demo_control.py), so
+    behavior is identical whether the scenario was switched from the CLI or
+    the browser. Also broadcasts "scenario_changed" over the websocket so
+    the frontend can reset zone risk display state -- App.jsx already has
+    a handler for this message type.
+    """
+    valid_scenarios = {"normal", "light_rain", "heavy_storm", "flash_flood"}
+    if scenario_name not in valid_scenarios:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario '{scenario_name}'. Valid: {sorted(valid_scenarios)}")
+
+    await redis_client.publish(
+        "demo:control",
+        json.dumps({"action": "set_scenario", "scenario": scenario_name}),
+    )
+    await _broadcast({"type": "scenario_changed", "scenario": scenario_name})
+    log.info("Scenario switched to %s via demo control", scenario_name)
+    return {"scenario": scenario_name}
+
 
 @app.post("/approve/{zone}")
 async def approve_action(zone: str):

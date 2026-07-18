@@ -19,6 +19,8 @@
   width: 100%;
   flex: 1;
   box-sizing: border-box;
+  align-items: start;  /* ADD THIS */
+  overflow: hidden;    /* ADD THIS */
 }
 
 .dashboard-map-panel {
@@ -29,7 +31,9 @@
 .dashboard-log-panel {
   display: flex;
   flex-direction: column;
-  height: auto;
+  height: 100%;
+  max-height: calc(100vh - 180px);  /* ADD THIS */
+  overflow: hidden;                  /* ADD THIS */
 }
 
 /* Responsive adjustment for tablets and mobile */

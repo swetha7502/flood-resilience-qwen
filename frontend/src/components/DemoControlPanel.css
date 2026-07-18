@@ -1,0 +1,139 @@
+.demo-panel {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background-color: rgba(22, 33, 44, 0.95);
+  border-bottom: 1px solid rgba(127, 168, 201, 0.15);
+  flex-wrap: wrap;
+}
+
+.demo-panel-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.demo-panel-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.demo-panel-divider {
+  width: 1px;
+  height: 36px;
+  background-color: rgba(127, 168, 201, 0.15);
+  flex-shrink: 0;
+}
+
+/* Scenario buttons */
+.demo-scenario-grid {
+  display: flex;
+  gap: 6px;
+}
+
+.demo-scenario-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(127, 168, 201, 0.2);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 72px;
+}
+
+.demo-scenario-btn:hover:not(:disabled) {
+  background: rgba(127, 168, 201, 0.1);
+  border-color: rgba(127, 168, 201, 0.4);
+}
+
+.demo-scenario-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.demo-scenario-btn--active {
+  border-color: var(--color-accent) !important;
+  background: rgba(127, 168, 201, 0.12) !important;
+}
+
+.demo-scenario-btn--heavy_storm.demo-scenario-btn--active {
+  border-color: var(--color-warning) !important;
+  background: rgba(234, 179, 8, 0.1) !important;
+}
+
+.demo-scenario-btn--flash_flood.demo-scenario-btn--active {
+  border-color: var(--color-emergency) !important;
+  background: rgba(153, 27, 27, 0.15) !important;
+}
+
+.demo-scenario-icon { font-size: 14px; }
+.demo-scenario-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.demo-scenario-desc {
+  font-size: 9px;
+  color: var(--color-text-muted);
+}
+
+/* Cloud buttons */
+.demo-cloud-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.demo-cloud-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.15s ease;
+}
+
+.demo-cloud-btn--on {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.06);
+  color: #86efac;
+}
+.demo-cloud-btn--on:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.15);
+}
+.demo-cloud-btn--on.demo-cloud-btn--active {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.demo-cloud-btn--off {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.06);
+  color: #fca5a5;
+}
+.demo-cloud-btn--off:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+}
+.demo-cloud-btn--off.demo-cloud-btn--active {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.demo-cloud-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.demo-cloud-hint {
+  font-size: 10px;
+  color: var(--color-warning);
+  margin: 0;
+  max-width: 200px;
+}

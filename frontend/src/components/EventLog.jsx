@@ -78,7 +78,18 @@ function renderEventBody(event) {
     const truncatedReason = event.reasoning
       ? event.reasoning.substring(0, 100) + (event.reasoning.length > 100 ? '...' : '')
       : 'No reasoning provided.';
-
+  
+  if (type === 'scenario_changed') {
+  const labels = {
+    normal: 'Normal', light_rain:  'Light Rain',
+    heavy_storm: 'Heavy Storm', flash_flood: 'Flash Flood',
+  };
+  return (
+    <span className="scenario-body">
+      Scenario → <strong>{labels[event.scenario] || event.scenario}</strong>
+    </span>
+  );
+}
     return (
       <div className="risk-body">
         <div className="risk-header-row">

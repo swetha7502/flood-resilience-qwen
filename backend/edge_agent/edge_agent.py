@@ -52,6 +52,19 @@ COORDINATOR_URL = os.getenv("COORDINATOR_URL", "http://localhost:8000")
 DEGRADED_AFTER_SEC = 10
 OFFLINE_AFTER_SEC = 30
 EXTENDED_AFTER_SEC = 90
+# Cost control: sensors publish every 2s (see sensor_agent.py INTERVAL_SECONDS),
+# and _subscribe_sensors runs _evaluate_zone on EVERY message. Without a
+# cooldown, a zone that stays flagged through a sustained scenario (e.g.
+# heavy_storm) re-runs the full decision pipeline -- including a real Qwen
+# API call when CONNECTED -- on every single sensor tick, i.e. roughly once
+# per second for a 2-sensor zone. That's not "once per multi-signal
+# co-occurrence event" as intended (see analyze_zone's docstring in
+# coordinator.py), it's continuous. This cooldown makes the first tick that
+# crosses the flagged threshold fire immediately (fast demo response), then
+# throttles further re-evaluation of that SAME ongoing condition to once per
+# window. It resets immediately once the zone drops back below threshold, so
+# a genuinely new escalation later is never delayed.
+ZONE_REEVALUATION_COOLDOWN_SEC = 20
 CLOUD_CALL_TIMEOUT_SEC = 3.0     # health probe / broadcast / catchup -- these are cheap, should be fast
 ANALYZE_CALL_TIMEOUT_SEC = 16.0  # /analyze specifically: coordinator now budgets up to 13s
                                   # internally (4s optional MCP audit-trend lookup + 9s for
@@ -137,6 +150,21 @@ class EdgeAgent:
         # {"current_fp":, "matched_fp":, "risk_level":, "timestamp":}
         self.last_replay_by_zone: dict = {}
 
+        # Cost-control cooldown state (see ZONE_REEVALUATION_COOLDOWN_SEC):
+        # timestamp of the last time THIS zone's decision pipeline actually
+        # ran while flagged. Cleared as soon as the zone drops below the
+        # flagged threshold, so the next escalation is never delayed by a
+        # stale cooldown.
+        self.zone_last_evaluated: dict = {}
+
+        # In-flight evaluation task per zone (see _subscribe_sensors). Lets
+        # zones be evaluated concurrently instead of one shared sequential
+        # loop blocking on a single slow cloud call -- while still
+        # preventing the SAME zone from stacking up duplicate concurrent
+        # Qwen calls if sensor messages arrive faster than one evaluation
+        # completes.
+        self.zone_eval_tasks: dict = {}
+
     async def start(self):
         self.redis = redis.from_url(REDIS_URL, decode_responses=True)
         self.http = httpx.AsyncClient(base_url=COORDINATOR_URL, timeout=CLOUD_CALL_TIMEOUT_SEC)
@@ -178,7 +206,25 @@ class EdgeAgent:
                 sensor = payload["sensor"]
                 value = payload["value"]
                 self.zone_readings[zone][sensor] = value
-                await self._evaluate_zone(zone)
+
+                # Fire-and-forget per zone, NOT `await` -- a slow cloud call
+                # for one zone (e.g. Qwen taking its full ~16s timeout, or a
+                # "cloud degrade" simulated 18s delay) must not block this
+                # loop from reading the next sensor message for ANY zone.
+                # Reproduced and confirmed this was a real stall before this
+                # fix: with a simulated slow response, a second zone's
+                # already-flagged sensors sat unevaluated for the entire
+                # duration of the first zone's in-flight call.
+                existing = self.zone_eval_tasks.get(zone)
+                if existing is None or existing.done():
+                    task = asyncio.create_task(self._evaluate_zone(zone))
+                    task.add_done_callback(self._log_zone_task_exception)
+                    self.zone_eval_tasks[zone] = task
+                # else: this zone already has an evaluation in flight --
+                # skip rather than stack a second concurrent one. The
+                # cooldown (ZONE_REEVALUATION_COOLDOWN_SEC) would likely
+                # have skipped it anyway, but this also protects the very
+                # first flagged tick, before any cooldown timestamp exists.
             except Exception as e:
                 log.warning("Bad sensor message: %s", e)
 
@@ -217,6 +263,17 @@ class EdgeAgent:
     # Zone evaluation
     # -----------------------------------------------------------------------
 
+    @staticmethod
+    def _log_zone_task_exception(task: asyncio.Task):
+        """Fire-and-forget tasks (see _subscribe_sensors) swallow exceptions
+        silently unless something checks them. This surfaces any unexpected
+        crash in a zone's evaluation instead of it vanishing invisibly."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.error("Zone evaluation task crashed: %s", exc, exc_info=exc)
+
     async def _evaluate_zone(self, zone: str):
         readings = self.zone_readings[zone]
         if len(readings) < 2:
@@ -227,7 +284,17 @@ class EdgeAgent:
         flagged = snapshot.flagged_sensors(bias=bias)
 
         if len(flagged) < 2:
+            # Zone recovered -- clear cooldown tracking so the NEXT time it
+            # crosses the flagged threshold, that's treated as a fresh event
+            # and evaluated immediately rather than waiting out a stale window.
+            self.zone_last_evaluated.pop(zone, None)
             return
+
+        now = time.time()
+        last_eval = self.zone_last_evaluated.get(zone)
+        if last_eval is not None and (now - last_eval) < ZONE_REEVALUATION_COOLDOWN_SEC:
+            return  # same ongoing co-occurrence, still within cooldown -- skip to save Qwen calls
+        self.zone_last_evaluated[zone] = now
 
         log.info("Zone %s: %d sensors flagged %s | cloud_state=%s",
                  zone, len(flagged), list(flagged.keys()), self.cloud_state.value)
@@ -277,6 +344,11 @@ class EdgeAgent:
                 if "error" not in data:
                     self._on_cloud_success(zone, readings, data)
                     return data
+                else:
+                    log.warning("Zone %s: coordinator reported error: %s", zone, data["error"])
+                    self._on_cloud_failure()
+            else:
+                self._on_cloud_failure()
         except (httpx.TimeoutException, httpx.ConnectError):
             self._on_cloud_failure()
         except Exception as e:
